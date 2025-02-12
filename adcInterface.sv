@@ -22,33 +22,16 @@ module adcInterface(
 
    // Next-State Logic & Combinational Outputs
    always_comb begin
-      // Default values (to prevent unintended latches)
       nextState = state;
       ADC_CONVST = 0;
 
       case (state)
-         HOLD: begin
-            nextState = CONVST_HIGH;
-         end
-         CONVST_HIGH: begin
-            nextState = CONVST_LOW;
-            ADC_CONVST = 1; // Start ADC conversion
-         end
-         CONVST_LOW: begin
-            nextState = TRANSFER;
-         end
-         TRANSFER: begin
-            if (transferCount >= 4'd12)
-               nextState = WAIT;
-            else
-               nextState = TRANSFER;
-         end
-         WAIT: begin
-            nextState = CONVST_HIGH;
-         end
-         default: begin
-            nextState = HOLD;
-         end
+         HOLD:        nextState = CONVST_HIGH;
+         CONVST_HIGH: begin nextState = CONVST_LOW; ADC_CONVST = 1; end
+         CONVST_LOW:  nextState = TRANSFER;
+         TRANSFER:    nextState = (transferCount >= 4'd12) ? WAIT : TRANSFER;
+         WAIT:        nextState = CONVST_HIGH;
+         default:     nextState = HOLD;
       endcase
    end
 
@@ -56,44 +39,61 @@ module adcInterface(
    always_ff @(negedge clk or negedge reset_n) begin
       if (!reset_n) begin
          state <= HOLD;
-         transferCount <= 4'b0;
+         //transferCount <= 4'b0;
          configWord <= 12'b0;
-         tempResult <= 12'b0;
-         result <= 12'b0;
       end else begin
          state <= nextState;
-
          if (state == CONVST_HIGH)
-            configWord <= {1'b1, chan[0], chan[2:1], 1'b1, 1'b0, 6'b000000}; // Set configWord
-
-         if (state == WAIT)
-            transferCount <= 4'b0;
+            configWord <= {1'b1, chan[0], chan[2:1], 1'b1, 1'b0, 6'b000000};
       end
    end
 
-   always_ff @(negedge clk) begin
-      if (state == CONVST_LOW) begin
-         ADC_SDI <= configWord[11]; // Preload MSB immediately when CONVST goes low
+   // ADC SDI Logic
+   always_ff @(negedge clk or negedge reset_n) begin
+      if (!reset_n) begin
+         ADC_SDI <= 0;
+      end else if (state == CONVST_LOW) begin
+         ADC_SDI <= configWord[11]; // Preload MSB
       end else if (state == TRANSFER && transferCount < 12) begin
-         ADC_SDI <= configWord[11 - transferCount]; // Send SDI bit at negedge clk
+         ADC_SDI <= configWord[11 - transferCount]; // Send next bit
       end else begin
-         ADC_SDI <= 0; // Ensure SDI goes low when TRANSFER ends
+         ADC_SDI <= 0;
       end
    end
 
    // Capture ADC_SDO at posedge clk
-   always_ff @(posedge clk) begin
-      if (state == TRANSFER && transferCount < 12) begin
-         tempResult[11 - transferCount] <= ADC_SDO; // Capture ADC_SDO at posedge clk
-         transferCount <= transferCount + 1;
+   always_ff @(posedge clk or negedge reset_n) begin
+      if (!reset_n) begin
+         tempResult <= 12'b0;
+      end else if (state == TRANSFER && transferCount < 12) begin
+         tempResult[11 - transferCount] <= ADC_SDO;
       end
-      if (state == TRANSFER && transferCount == 11)
-         result <= tempResult; // Update result at the end of TRANSFER
+   end
+
+   // Result register (fixing multiple drivers issue)
+   always_ff @(posedge clk or negedge reset_n) begin
+      if (!reset_n) begin
+         result <= 12'b0;
+      end else if (state == TRANSFER && transferCount == 11) begin
+         result <= tempResult;
+      end
+   end
+
+   // Transfer count logic
+   always_ff @(posedge clk or negedge reset_n) begin
+      if (!reset_n) begin
+         transferCount <= 4'b0;
+      end else if (state == TRANSFER && transferCount < 12) begin
+         transferCount <= transferCount + 4'b1;
+      end else if (state == WAIT) begin
+         transferCount <= 4'b0;
+      end
    end
 
    // SPI Clock (SCK) generation
    assign ADC_SCK = (state == TRANSFER) ? clk : 1'b0;
 
 endmodule
+
 
 

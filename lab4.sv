@@ -24,17 +24,19 @@ module lab4 (
    // **new** //
    logic [11:0] ADC_result; // stores the current frequency being played
    logic [2:0] ADC_channel;     // ADC channel requested by user
+	logic [5:0] adc_clk_div;
+	logic ADC_clk;
 
    // instantiate modules to implement design
    decode2 decode2_0 (.digit(digit), .ct(ct)) ;
    decode7 decode7_0 (.num(disp_digit), .leds(leds)) ;
    whiteOut dmLEDS (.red, .green, .blue) ; // comment out to use BP leds
-   encoder encoder_1 (.clk(CLOCK_50), .a(enc1_a), .b(enc1_b), .cw(enc1_cw), .ccw(enc1_ccw));
+   encoder encoder_1 (.clk(CLOCK_50), .a(enc1_a), .b(enc1_b), .cw(enc1_cw), .ccw(enc1_ccw), .reset_n(s1));
    // **new** //
    //enc2bcd bdc_0 ( .clk(CLOCK_50), .enc_count(freq), .bcd_count(bcd_count) );
    enc2chan channelEncoder_1 ( .clk(CLOCK_50), .reset_n(s1), .cw(enc1_cw), .ccw(enc1_ccw), .chan(ADC_channel) ) ;
    adcInterface adcInterface_0 ( 
-      .clk(CLOCK_50), 
+      .clk(ADC_clk), 
       .reset_n(s1), 
       .chan(ADC_channel), 
       .result(ADC_result), 
@@ -48,17 +50,23 @@ module lab4 (
 
    // use count to divide clock and generate a 2 bit digit counter to determine which digit to display
    always_ff @(posedge CLOCK_50) begin
+      adc_clk_div <= adc_clk_div + 1'b1;
+      ADC_clk <= adc_clk_div[5:4];  // we might have to play with this a bit
+   end
+	
+   // use count to divide clock and generate a 2 bit digit counter to determine which digit to display
+   always_ff @(posedge CLOCK_50) begin
       clk_div_count <= clk_div_count + 1'b1;
-      digit <= clk_div_count[17:16];  // we might have to play with this a bit
+      digit <= clk_div_count[15:14];  
    end
 
    // Select digit to display (disp_digit) from last 4 nibbles of freq
    always_comb begin
       case (digit)
-         2'b00: disp_digit = ADC_channel; // preferably, bcd_count, not freq
-         2'b01: disp_digit = ADC_result[3:0]; 
-         2'b10: disp_digit = ADC_result[7:4];
-         2'b11: disp_digit = ADC_result[11:8];
+         2'b00: disp_digit = ADC_result[3:0]; // preferably, bcd_count, not freq
+         2'b01: disp_digit = ADC_result[7:4]; 
+         2'b10: disp_digit = ADC_result[11:8];
+         2'b11: disp_digit = ADC_channel;
          default: disp_digit = 16'h0000;        // Default case (shouldn't occur)
       endcase
    end
